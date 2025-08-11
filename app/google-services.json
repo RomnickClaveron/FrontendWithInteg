@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "1065302574594",
+    "firebase_url": "https://pillnow-default-rtdb.firebaseio.com",
+    "project_id": "pillnow",
+    "storage_bucket": "pillnow.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1065302574594:android:5d827bafa9ca250907091b",
+        "android_client_info": {
+          "package_name": "com.pillnow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAs8Mq0ccAgwPsaDB9oBCqd2yTxZIeAc48"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
