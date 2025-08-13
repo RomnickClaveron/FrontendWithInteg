@@ -1,17 +1,40 @@
-import React, { useState } from "react";
-import { View, Text, Image, TouchableOpacity, Modal, FlatList, ScrollView, StyleSheet, Platform } from "react-native";
+import React, { useState, useEffect } from "react";
+import { View, Text, Image, TouchableOpacity, Modal, FlatList, ScrollView, StyleSheet, Platform, ActivityIndicator, Alert } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from './context/ThemeContext';
 import { lightTheme, darkTheme } from './styles/theme';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { jwtDecode } from "jwt-decode";
+
+// Interface for decoded JWT token
+interface DecodedToken {
+  id: string;
+  userId?: string;
+  role?: string;
+}
 
 // Explicit types for slots and state objects
 type PillSlot = 1 | 2 | 3;
 
 type SelectedPillsState = Record<PillSlot, string | null>;
 
-type AlarmsState = Record<PillSlot, Date[]>;
+type AlarmsState = Record<number, Date[]>;
+
+// Type for medication data from API
+interface Medication {
+  _id: string;
+  name: string;
+  description: string;
+  dosage: string;
+  form: string;
+  manufacturer: string;
+  createdAt: string;
+  updatedAt: string;
+  medId: number;
+  __v: number;
+}
 
 const SetScreen = () => {
   const navigation = useNavigation();
@@ -27,7 +50,85 @@ const SetScreen = () => {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [showTimePicker, setShowTimePicker] = useState<boolean>(false);
-  const pillChoices = ["Pill A", "Pill B", "Pill C", "Pill D", "Pill E"];
+  
+  // New state for API data
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch medications from API and clear any existing data
+  useEffect(() => {
+    fetchMedications();
+    // Clear any existing data to start fresh
+    setSelectedPills({ 1: null, 2: null, 3: null });
+    setAlarms({ 1: [], 2: [], 3: [] });
+    setCurrentPillSlot(null);
+    setSelectedDate(new Date());
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+    setPillModalVisible(false);
+    setAlarmModalVisible(false);
+    setConfirmModalVisible(false);
+    setWarningModalVisible(false);
+  }, []);
+
+  // Clear data when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('SetScreen focused - clearing data');
+      // Clear any existing data to start fresh
+      setSelectedPills({ 1: null, 2: null, 3: null });
+      setAlarms({ 1: [], 2: [], 3: [] });
+      setCurrentPillSlot(null);
+      setSelectedDate(new Date());
+      setShowDatePicker(false);
+      setShowTimePicker(false);
+      setPillModalVisible(false);
+      setAlarmModalVisible(false);
+      setConfirmModalVisible(false);
+      setWarningModalVisible(false);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  const resetAllData = () => {
+    console.log('Resetting all data in SetScreen');
+    setSelectedPills({ 1: null, 2: null, 3: null });
+    setAlarms({ 1: [], 2: [], 3: [] });
+    setCurrentPillSlot(null);
+    setSelectedDate(new Date());
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+    setPillModalVisible(false);
+    setAlarmModalVisible(false);
+    setConfirmModalVisible(false);
+    setWarningModalVisible(false);
+  };
+
+  const fetchMedications = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch('https://pillnow-database.onrender.com/api/medications');
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Raw medications response (SetScreen):', data);
+      const medsArray = Array.isArray(data) ? data : (data?.data || []);
+      console.log('Processed medications array (SetScreen):', medsArray);
+      console.log('Medications array length (SetScreen):', medsArray.length);
+      setMedications(medsArray);
+    } catch (err) {
+      console.error('Error fetching medications:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch medications');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handlePillSelection = (pill: string) => {
     if (currentPillSlot === null) return;
@@ -91,6 +192,112 @@ const SetScreen = () => {
     setAlarmModalVisible(false);
   };
 
+  // Get current user ID from JWT token
+  const getCurrentUserId = async (): Promise<number> => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        console.warn('No token found, using default user ID 1');
+        return 1;
+      }
+
+      const decodedToken = jwtDecode<DecodedToken>(token.trim());
+      const rawId = decodedToken.userId ?? decodedToken.id;
+      const userId = parseInt(rawId);
+      
+      if (isNaN(userId)) {
+        console.warn('Invalid user ID in token, using default user ID 1');
+        return 1;
+      }
+
+      console.log('Current user ID from token:', userId);
+      return userId;
+    } catch (error) {
+      console.error('Error getting user ID from token:', error);
+      return 1; // Default fallback
+    }
+  };
+
+  // Save schedule data to database
+  const saveScheduleData = async () => {
+    try {
+      // Get current user ID
+      const currentUserId = await getCurrentUserId();
+      
+      // Create schedule records for each pill and alarm combination
+      const scheduleRecords: Array<{
+        scheduleId: number;
+        user: number;
+        medication: number;
+        container: number;
+        date: string;
+        time: string;
+        status: string;
+        alertSent: boolean;
+      }> = [];
+      let scheduleId = 1;
+      
+      // Process each container
+      for (let containerNum = 1; containerNum <= 3; containerNum++) {
+        const pillName = selectedPills[containerNum as PillSlot];
+        const containerAlarms = alarms[containerNum];
+        
+        if (pillName && containerAlarms.length > 0) {
+          // Find the medication ID from the medications array
+          const medication = medications.find(med => med.name === pillName);
+          if (medication) {
+            // Create a schedule record for each alarm time using medication ID
+            containerAlarms.forEach(alarmDate => {
+              const scheduleRecord = {
+                scheduleId: scheduleId++,
+                user: currentUserId, // Use current user ID from token
+                medication: medication.medId, // Use medication ID (number) as required by backend
+                container: containerNum, // Add container number
+                date: alarmDate.toISOString().split('T')[0], // YYYY-MM-DD format
+                time: alarmDate.toTimeString().split(' ')[0].substring(0, 5), // HH:MM format
+                status: 'Pending',
+                alertSent: false
+              };
+              scheduleRecords.push(scheduleRecord);
+            });
+          }
+        }
+      }
+      
+      console.log('Sending schedule records:', JSON.stringify(scheduleRecords, null, 2));
+      
+      // Send each schedule record individually
+      const promises = scheduleRecords.map(record => 
+        fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(record),
+        })
+      );
+      
+      const responses = await Promise.all(promises);
+      
+      // Check if all requests were successful
+      const failedResponses = responses.filter(response => !response.ok);
+      if (failedResponses.length > 0) {
+        const errorText = await failedResponses[0].text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`HTTP error! status: ${failedResponses[0].status} - ${errorText}`);
+      }
+      
+      const results = await Promise.all(responses.map(response => response.json()));
+      console.log('API Responses:', results);
+      Alert.alert('Success', 'Schedule saved successfully!', [
+        { text: 'OK', onPress: () => navigation.navigate("ElderDashboard" as never) }
+      ]);
+    } catch (err) {
+      console.error('Error saving schedule:', err);
+      Alert.alert('Error', `Failed to save schedule: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Header */}
@@ -107,23 +314,49 @@ const SetScreen = () => {
       </View>
 
       <Image source={require("@/assets/images/pillnow.png")} style={styles.pillImage} />
+      
+      {/* Debug Reset Button */}
+      <TouchableOpacity 
+        style={[styles.debugButton, { backgroundColor: theme.primary }]} 
+        onPress={resetAllData}
+      >
+        <Text style={[styles.debugButtonText, { color: theme.card }]}>Reset All Data (Debug)</Text>
+      </TouchableOpacity>
+      
       <Text style={[styles.sectionTitle, { color: theme.secondary }]}>Pill Intake</Text>
-      {([1, 2, 3] as const).map((num) => (
-        <View key={num} style={[styles.pillContainer, { backgroundColor: theme.card }]}>
-          <View>
-            <Text style={[styles.pillText, { color: theme.primary }]}>Container {num}: {selectedPills[num] || "ADD PILL"}</Text>
-            {alarms[num].map((alarm: Date, index: number) => (
-              <Text key={index} style={[styles.alarmText, { color: theme.text }]}>{alarm.toLocaleString()}</Text>
-            ))}
-          </View>
-          <TouchableOpacity onPress={() => handleAddPill(num)}>
-            <Ionicons name="add-circle-outline" size={24} color={theme.primary} />
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.text }]}>Loading medications...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={[styles.errorText, { color: theme.text }]}>{error}</Text>
+          <TouchableOpacity 
+            style={[styles.retryButton, { backgroundColor: theme.primary }]}
+            onPress={fetchMedications}
+          >
+            <Text style={[styles.retryButtonText, { color: theme.card }]}>Retry</Text>
           </TouchableOpacity>
         </View>
-      ))}
+      ) : (
+        ([1, 2, 3] as const).map((num) => (
+          <View key={num} style={[styles.pillContainer, { backgroundColor: theme.card }]}>
+            <View>
+              <Text style={[styles.pillText, { color: theme.primary }]}>Container {num}: {selectedPills[num] || "ADD PILL"}</Text>
+              {alarms[num].map((alarm: Date, index: number) => (
+                <Text key={index} style={[styles.alarmText, { color: theme.text }]}>{alarm.toLocaleString()}</Text>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => handleAddPill(num)}>
+              <Ionicons name="add-circle-outline" size={24} color={theme.primary} />
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
       <TouchableOpacity 
         style={[styles.confirmButton, { backgroundColor: theme.primary }]} 
-        onPress={() => navigation.navigate("ModifySchedule" as never)}
+        onPress={saveScheduleData}
       > 
         <Text style={[styles.confirmButtonText, { color: theme.card }]}>CONFIRM</Text>
       </TouchableOpacity>
@@ -157,16 +390,28 @@ const SetScreen = () => {
       <Modal visible={pillModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
-            <Text style={[styles.modalTitle, { color: theme.secondary }]}>Select a Pill</Text>
+            <Text style={[styles.modalTitle, { color: theme.secondary }]}>Select a Medication</Text>
+            <Text style={[styles.debugText, { color: theme.text }]}>
+              Available medications: {medications.length}
+            </Text>
             <FlatList 
-              data={pillChoices} 
-              keyExtractor={(item) => item} 
+              data={medications} 
+              keyExtractor={(item) => item._id} 
+              style={{ maxHeight: 300, width: '100%' }}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  onPress={() => handlePillSelection(item)} 
+                  onPress={() => handlePillSelection(item.name)} 
                   style={[styles.modalItem, { borderBottomColor: theme.background }]}
                 >
-                  <Text style={[styles.modalItemText, { color: theme.primary }]}>{item}</Text>
+                  <View style={styles.medicationItem}>
+                    <Text style={[styles.medicationName, { color: theme.primary }]}>{item.name}</Text>
+                    <Text style={[styles.medicationStrength, { color: theme.text }]}>
+                      {item.dosage} {item.form}
+                    </Text>
+                    <Text style={[styles.medicationDescription, { color: theme.text }]} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               )} 
             />
@@ -293,7 +538,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    width: 300,
+    width: 350,
+    maxHeight: 500,
     padding: 20,
     borderRadius: 15,
     alignItems: 'center',
@@ -353,6 +599,72 @@ const styles = StyleSheet.create({
   },
   continueButtonText: {
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  errorText: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    padding: 20,
+  },
+  retryButton: {
+    marginTop: 15,
+    padding: 12,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  medicationItem: {
+    paddingVertical: 8,
+  },
+  medicationName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  medicationStrength: {
+    fontSize: 14,
+    marginBottom: 4,
+    opacity: 0.8,
+  },
+  medicationDescription: {
+    fontSize: 12,
+    opacity: 0.7,
+    lineHeight: 16,
+  },
+  debugText: {
+    fontSize: 14,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  debugButton: {
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 10,
+    alignItems: 'center',
+    elevation: 2,
+  },
+  debugButtonText: {
+    fontSize: 14,
     fontWeight: 'bold',
   },
 });
