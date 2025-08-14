@@ -75,7 +75,6 @@ const SetScreen = () => {
   // Clear data when screen comes into focus
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      console.log('SetScreen focused - clearing data');
       // Clear any existing data to start fresh
       setSelectedPills({ 1: null, 2: null, 3: null });
       setAlarms({ 1: [], 2: [], 3: [] });
@@ -93,7 +92,6 @@ const SetScreen = () => {
   }, [navigation]);
 
   const resetAllData = () => {
-    console.log('Resetting all data in SetScreen');
     setSelectedPills({ 1: null, 2: null, 3: null });
     setAlarms({ 1: [], 2: [], 3: [] });
     setCurrentPillSlot(null);
@@ -117,10 +115,7 @@ const SetScreen = () => {
       }
       
       const data = await response.json();
-      console.log('Raw medications response (SetScreen):', data);
       const medsArray = Array.isArray(data) ? data : (data?.data || []);
-      console.log('Processed medications array (SetScreen):', medsArray);
-      console.log('Medications array length (SetScreen):', medsArray.length);
       setMedications(medsArray);
     } catch (err) {
       console.error('Error fetching medications:', err);
@@ -210,7 +205,6 @@ const SetScreen = () => {
         return 1;
       }
 
-      console.log('Current user ID from token:', userId);
       return userId;
     } catch (error) {
       console.error('Error getting user ID from token:', error);
@@ -264,8 +258,6 @@ const SetScreen = () => {
         }
       }
       
-      console.log('Sending schedule records:', JSON.stringify(scheduleRecords, null, 2));
-      
       // Send each schedule record individually
       const promises = scheduleRecords.map(record => 
         fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
@@ -288,7 +280,6 @@ const SetScreen = () => {
       }
       
       const results = await Promise.all(responses.map(response => response.json()));
-      console.log('API Responses:', results);
       Alert.alert('Success', 'Schedule saved successfully!', [
         { text: 'OK', onPress: () => navigation.navigate("ElderDashboard" as never) }
       ]);
@@ -314,14 +305,6 @@ const SetScreen = () => {
       </View>
 
       <Image source={require("@/assets/images/pillnow.png")} style={styles.pillImage} />
-      
-      {/* Debug Reset Button */}
-      <TouchableOpacity 
-        style={[styles.debugButton, { backgroundColor: theme.primary }]} 
-        onPress={resetAllData}
-      >
-        <Text style={[styles.debugButtonText, { color: theme.card }]}>Reset All Data (Debug)</Text>
-      </TouchableOpacity>
       
       <Text style={[styles.sectionTitle, { color: theme.secondary }]}>Pill Intake</Text>
       {loading ? (
@@ -391,9 +374,7 @@ const SetScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
             <Text style={[styles.modalTitle, { color: theme.secondary }]}>Select a Medication</Text>
-            <Text style={[styles.debugText, { color: theme.text }]}>
-              Available medications: {medications.length}
-            </Text>
+
             <FlatList 
               data={medications} 
               keyExtractor={(item) => item._id} 

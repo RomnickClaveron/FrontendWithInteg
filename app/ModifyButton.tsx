@@ -104,16 +104,12 @@ const ModifyButton = () => {
         setError(null);
         
         // First fetch medications
-        console.log('Fetching medications...');
         const medicationsResponse = await fetch('https://pillnow-database.onrender.com/api/medications');
         if (!medicationsResponse.ok) {
           throw new Error(`Failed to fetch medications: ${medicationsResponse.status}`);
         }
         const medicationsData = await medicationsResponse.json();
-        console.log('Raw medications response:', medicationsData);
         const medsArray = Array.isArray(medicationsData) ? medicationsData : (medicationsData?.data || []);
-        console.log('Processed medications array:', medsArray);
-        console.log('Medications array length:', medsArray.length);
         setMedications(medsArray);
         
         // Then load saved data and fetch schedules
@@ -132,8 +128,6 @@ const ModifyButton = () => {
   // Load schedule data from database (same as Monitor & Manage)
   const loadScheduleData = async () => {
     try {
-      console.log('Loading schedule data...');
-      
       const schedulesResponse = await fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
         headers: {
           'Cache-Control': 'no-cache',
@@ -142,14 +136,9 @@ const ModifyButton = () => {
         }
       });
       const schedulesData = await schedulesResponse.json();
-      console.log('Raw schedule response:', schedulesData);
       
       // Get all schedules and show the latest ones (no user/status filtering) - same as Monitor & Manage
       const allSchedules = schedulesData.data || [];
-      console.log('All schedules:', allSchedules);
-      
-      // Debug: Log schedule medication IDs
-      console.log('Schedule medication IDs:', allSchedules.map((s: any) => ({ scheduleId: s.scheduleId, medicationId: s.medication })));
       
       // Sort by schedule ID (highest first) and take top 3, then arrange by container number - same as Monitor & Manage
       const sortedSchedules = allSchedules
@@ -162,7 +151,6 @@ const ModifyButton = () => {
           return containerA - containerB;
         });
       
-      console.log('Final sorted schedules:', sortedSchedules);
       setSchedules(sortedSchedules);
     } catch (error) {
       console.error('Error loading schedule data:', error);
@@ -172,8 +160,6 @@ const ModifyButton = () => {
   // Load saved schedule data from database
   const loadSavedData = async () => {
     try {
-      console.log('Loading saved data...');
-      console.log('Current medications state:', medications);
       const response = await fetch('https://pillnow-database.onrender.com/api/medication_schedules');
       
       if (!response.ok) {
@@ -181,11 +167,9 @@ const ModifyButton = () => {
       }
       
       const responseData = await response.json();
-      console.log('Schedules loaded:', responseData);
       
       // Extract the actual schedules array from the response
       const schedules = responseData.data || [];
-      console.log('Extracted schedules:', schedules);
       
       if (schedules && schedules.length > 0) {
         const currentUserId = await getCurrentUserId();
@@ -205,7 +189,7 @@ const ModifyButton = () => {
           schedulesByContainer[containerNum].push(schedule);
         });
         
-        console.log('Schedules grouped by container:', schedulesByContainer);
+
         
         // Process each container
         for (let containerNum = 1; containerNum <= 3; containerNum++) {
@@ -258,13 +242,8 @@ const ModifyButton = () => {
           }
         }
         
-        console.log('Final selected pills:', selectedPills);
-        console.log('Final converted alarms:', convertedAlarms);
-        
         setSelectedPills(selectedPills);
         setAlarms(convertedAlarms);
-      } else {
-        console.log('No schedules found in database');
       }
     } catch (err) {
       console.error('Error loading saved data:', err);
@@ -279,8 +258,12 @@ const ModifyButton = () => {
     try {
       setSaving(true);
       
-      // First, clear existing schedules (you might want to implement a DELETE endpoint)
-      // For now, we'll just create new ones
+      const currentUserId = await getCurrentUserId();
+      
+      // First, get existing schedules to determine which ones to update vs create
+      const existingSchedulesResponse = await fetch('https://pillnow-database.onrender.com/api/medication_schedules');
+      const existingSchedulesData = await existingSchedulesResponse.json();
+      const existingSchedules = existingSchedulesData.data || [];
       
       // Create schedule records for each pill and alarm combination
       const scheduleRecords: Array<{
@@ -295,8 +278,6 @@ const ModifyButton = () => {
       }> = [];
       let scheduleId = 1;
       
-      const currentUserId = await getCurrentUserId();
-
       // Process each container
       for (let containerNum = 1; containerNum <= 3; containerNum++) {
         const pillName = selectedPills[containerNum];
@@ -324,18 +305,38 @@ const ModifyButton = () => {
         }
       }
       
-      console.log('Sending updated schedule records:', JSON.stringify(scheduleRecords, null, 2));
-      
-      // Send each schedule record individually
-      const promises = scheduleRecords.map(record => 
-        fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(record),
-        })
-      );
+      // Process each schedule record - update existing or create new
+      const promises = scheduleRecords.map(async (record, index) => {
+        // Check if there's an existing schedule for this container and time slot
+        const existingSchedule = existingSchedules.find((existing: any) => 
+          existing.container === record.container && 
+          existing.user === record.user &&
+          existing.medication === record.medication
+        );
+        
+        if (existingSchedule) {
+          // Update existing schedule using PUT
+          return fetch(`https://pillnow-database.onrender.com/api/medication_schedules/${existingSchedule._id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ...record,
+              scheduleId: existingSchedule.scheduleId // Keep the existing scheduleId
+            }),
+          });
+        } else {
+          // Create new schedule using POST
+          return fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(record),
+          });
+        }
+      });
       
       const responses = await Promise.all(promises);
       
@@ -348,8 +349,10 @@ const ModifyButton = () => {
       }
       
       const results = await Promise.all(responses.map(response => response.json()));
-      console.log('API Responses:', results);
       Alert.alert('Success', 'Schedule updated successfully!');
+      
+      // Refresh the schedule data to show the updated schedules
+      await loadScheduleData();
     } catch (err) {
       console.error('Error saving schedule:', err);
       Alert.alert('Error', `Failed to save schedule: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -468,9 +471,9 @@ const ModifyButton = () => {
       // Get current user ID
       const currentUserId = await getCurrentUserId();
 
-      // Create updated schedule data with a new ID (to avoid conflicts)
+      // Create updated schedule data using the existing schedule ID
       const updatedSchedule = {
-        scheduleId: Date.now(), // Generate new ID to avoid conflicts
+        scheduleId: editingSchedule.scheduleId, // Use existing schedule ID
         user: currentUserId,
         medication: medication.medId,
         container: editingSchedule.container,
@@ -480,9 +483,9 @@ const ModifyButton = () => {
         alertSent: false
       };
 
-      // Send POST request to create the updated schedule
-      const response = await fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
-        method: 'POST',
+      // Send PUT request to update the existing schedule using MongoDB _id
+      const response = await fetch(`https://pillnow-database.onrender.com/api/medication_schedules/${editingSchedule._id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -495,11 +498,14 @@ const ModifyButton = () => {
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
-      // Remove the old schedule from the display and add the new one
-      setSchedules(prevSchedules => {
-        const filteredSchedules = prevSchedules.filter(schedule => schedule.scheduleId !== editingSchedule.scheduleId);
-        return [...filteredSchedules, updatedSchedule].sort((a, b) => b.scheduleId - a.scheduleId).slice(0, 3);
-      });
+      // Update the schedule in the local state
+      setSchedules(prevSchedules => 
+        prevSchedules.map(schedule => 
+          schedule._id === editingSchedule._id 
+            ? updatedSchedule 
+            : schedule
+        )
+      );
 
       Alert.alert('Success', 'Schedule updated successfully!');
       setEditModalVisible(false);
@@ -510,7 +516,7 @@ const ModifyButton = () => {
     }
   };
 
-  const handleDeleteSchedule = (scheduleId: number) => {
+  const handleDeleteSchedule = (scheduleId: string) => {
     Alert.alert(
       'Delete Schedule',
       'Are you sure you want to delete this schedule? This action cannot be undone.',
@@ -523,7 +529,7 @@ const ModifyButton = () => {
             try {
               // Since backend doesn't support DELETE, we'll filter out this schedule from display
               // In a real implementation, you'd want to add a DELETE endpoint
-              setSchedules(prevSchedules => prevSchedules.filter(schedule => schedule.scheduleId !== scheduleId));
+              setSchedules(prevSchedules => prevSchedules.filter(schedule => schedule._id !== scheduleId));
               Alert.alert('Success', 'Schedule removed from display! Note: Backend DELETE endpoint needed for permanent removal.');
             } catch (err) {
               console.error('Error deleting schedule:', err);
@@ -635,7 +641,7 @@ const ModifyButton = () => {
                     const medicationName = medication ? medication.name : `ID: ${schedule.medication}`;
                     
                     return (
-                      <View key={schedule.scheduleId || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
+                      <View key={schedule._id || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
                         <View style={styles.scheduleHeader}>
                           <Text style={[styles.scheduleTitle, { color: theme.primary }]}>
                             Container {schedule.container}
@@ -657,7 +663,7 @@ const ModifyButton = () => {
                             </TouchableOpacity>
                             <TouchableOpacity 
                               style={[styles.deleteButton, { backgroundColor: theme.error }]}
-                              onPress={() => handleDeleteSchedule(schedule.scheduleId)}
+                              onPress={() => handleDeleteSchedule(schedule._id)}
                             >
                               <Ionicons name="trash" size={16} color={theme.card} />
                             </TouchableOpacity>
@@ -711,9 +717,7 @@ const ModifyButton = () => {
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
             <Text style={[styles.modalTitle, { color: theme.secondary }]}>Select a Medication</Text>
-            <Text style={[styles.debugText, { color: theme.text }]}>
-              Available medications: {medications.length}
-            </Text>
+
             <FlatList
               data={medications}
               keyExtractor={(item) => item._id}
@@ -1156,11 +1160,7 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     fontWeight: 'bold',
   },
-  debugText: {
-    fontSize: 14,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
+
   editLabel: {
     fontSize: 16,
     fontWeight: 'bold',

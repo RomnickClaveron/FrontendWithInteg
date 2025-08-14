@@ -125,9 +125,6 @@ const MonitorManageScreen = () => {
       // Normalize medications to an array regardless of API wrapper shape
       const medsArray = Array.isArray(medicationsData) ? medicationsData : (medicationsData?.data || []);
       
-      // Debug: Log available medications
-      console.log('Available medications:', medsArray.map((med: any) => ({ id: med._id || med.id || med.medicationId, name: med.name })));
-      
       const schedulesResponse = await fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
         headers: {
           'Cache-Control': 'no-cache',
@@ -136,14 +133,18 @@ const MonitorManageScreen = () => {
         }
       });
       const schedulesData = await schedulesResponse.json();
-      // Get all schedules and show the latest ones (no user/status filtering)
+      
+      // Get all schedules and filter by current user ID
       const allSchedules = schedulesData.data || [];
       
-      // Debug: Log schedule medication IDs
-      console.log('Schedule medication IDs:', allSchedules.map((s: any) => ({ scheduleId: s.scheduleId, medicationId: s.medication })));
+      // Filter schedules to only show those belonging to the current user
+      const userSchedules = allSchedules.filter((schedule: any) => {
+        const scheduleUserId = parseInt(schedule.user);
+        return scheduleUserId === currentUserId;
+      });
       
       // Sort by schedule ID (highest first) and take top 3, then arrange by container number
-      const sortedSchedules = allSchedules
+      const sortedSchedules = userSchedules
         .sort((a: any, b: any) => b.scheduleId - a.scheduleId) // Sort by highest schedule ID first
         .slice(0, 3) // Take top 3 highest schedule IDs
         .sort((a: any, b: any) => {
@@ -272,7 +273,7 @@ const MonitorManageScreen = () => {
       {/* Current Scheduled Section */}
       <View style={[styles.scheduleSection, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.secondary }]}>
-          Current Scheduled
+          Current Schedules
         </Text>
         
         {schedules.length === 0 ? (
@@ -289,7 +290,7 @@ const MonitorManageScreen = () => {
               const medicationName = medication ? medication.name : `ID: ${schedule.medication}`;
               
               return (
-                <View key={schedule.scheduleId || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
+                <View key={schedule._id || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
                   <View style={styles.scheduleHeader}>
                     <Text style={[styles.scheduleTitle, { color: theme.primary }]}>
                       Container {schedule.container}
