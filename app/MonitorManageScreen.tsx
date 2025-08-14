@@ -83,6 +83,17 @@ const MonitorManageScreen = () => {
     }
   };
 
+  // Get selected elder ID for caregivers
+  const getSelectedElderId = async (): Promise<string | null> => {
+    try {
+      const selectedElderId = await AsyncStorage.getItem('selectedElderId');
+      return selectedElderId;
+    } catch (error) {
+      console.error('Error getting selected elder ID:', error);
+      return null;
+    }
+  };
+
   // Get latest schedule ID
   const getLatestScheduleId = async (): Promise<number> => {
     try {
@@ -134,14 +145,27 @@ const MonitorManageScreen = () => {
       });
       const schedulesData = await schedulesResponse.json();
       
-      // Get all schedules and filter by current user ID
+      // Get all schedules and filter by current user ID or selected elder ID
       const allSchedules = schedulesData.data || [];
       
-      // Filter schedules to only show those belonging to the current user
-      const userSchedules = allSchedules.filter((schedule: any) => {
-        const scheduleUserId = parseInt(schedule.user);
-        return scheduleUserId === currentUserId;
-      });
+      // Check if there's a selected elder (for caregivers)
+      const selectedElderId = await getSelectedElderId();
+      
+      // Filter schedules based on user role and selected elder
+      let userSchedules;
+      if (selectedElderId) {
+        // If caregiver has selected an elder, show that elder's schedules
+        userSchedules = allSchedules.filter((schedule: any) => {
+          const scheduleUserId = parseInt(schedule.user);
+          return scheduleUserId === parseInt(selectedElderId);
+        });
+      } else {
+        // Otherwise, show current user's schedules
+        userSchedules = allSchedules.filter((schedule: any) => {
+          const scheduleUserId = parseInt(schedule.user);
+          return scheduleUserId === currentUserId;
+        });
+      }
       
       // Sort by schedule ID (highest first) and take top 3, then arrange by container number
       const sortedSchedules = userSchedules
