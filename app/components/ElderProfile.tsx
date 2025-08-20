@@ -246,6 +246,9 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
 
       // Add to connected elders list
       const updatedElders = [...connectedElders, elder!];
+      console.log('Adding elder to list:', elder!);
+      console.log('Elder object structure:', JSON.stringify(elder!, null, 2));
+      console.log('Updated elders list:', updatedElders);
       await saveConnectedElders(updatedElders);
       setConnectedElders(updatedElders);
 
@@ -277,8 +280,12 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
     }
     
     // Check if elder is actually in the list
+    console.log('Current connected elders for removal check:', connectedElders);
+    console.log('Looking for elder with ID:', elderId);
+    
     const elderInList = connectedElders.find(elder => {
       const elderUserId = elder.userId || elder._id || elder.id;
+      console.log('Checking elder:', elder.name, 'with ID fields:', { userId: elder.userId, _id: elder._id, id: elder.id });
       return elderUserId === elderId;
     });
     
@@ -290,14 +297,15 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
     }
     
     console.log('Found elder in list:', elderInList.name);
+    console.log('Elder object structure for removal:', JSON.stringify(elderInList, null, 2));
     
     Alert.alert(
-      'Remove Elder',
-      'Are you sure you want to remove this elder from your list?',
+      'Disconnect Elder',
+      'Are you sure you want to disconnect from this elder? This will remove them from your monitoring list but will not delete their account.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove',
+          text: 'Disconnect',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -306,19 +314,28 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
               console.log('Looking for elder with ID:', elderId);
               
               // Remove from list using any available ID field
+              console.log('Before removal - connected elders count:', connectedElders.length);
               const updatedElders = connectedElders.filter(elder => {
                 const elderUserId = elder.userId || elder._id || elder.id;
-                console.log('Comparing elder ID:', elderUserId, 'with:', elderId);
+                console.log('Comparing elder ID:', elderUserId, 'with:', elderId, 'Result:', elderUserId !== elderId);
                 return elderUserId !== elderId;
               });
               
+              console.log('After removal - updated elders count:', updatedElders.length);
               console.log('Updated elders list:', updatedElders);
               
               await saveConnectedElders(updatedElders);
               setConnectedElders(updatedElders);
 
-              console.log('Elder removed successfully');
-              Alert.alert('Success', 'Elder removed successfully');
+              console.log('Elder disconnected successfully');
+              console.log('State updated, connected elders count:', updatedElders.length);
+              
+              // Force a re-render by updating state again
+              setTimeout(() => {
+                setConnectedElders([...updatedElders]);
+              }, 100);
+              
+              Alert.alert('Success', 'Elder disconnected successfully');
             } catch (error) {
               console.error('Error removing elder:', error);
               Alert.alert('Error', 'Failed to remove elder');
@@ -496,7 +513,7 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
                     activeOpacity={0.7}
                   >
                     <Ionicons name="close" size={16} color={theme.card} />
-                    <Text style={[styles.actionText, { color: theme.card }]}>Remove</Text>
+                    <Text style={[styles.actionText, { color: theme.card }]}>Disconnect</Text>
                   </TouchableOpacity>
                 </View>
               </View>
