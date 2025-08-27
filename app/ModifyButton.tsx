@@ -641,7 +641,7 @@ const ModifyButton = () => {
                     const medicationName = medication ? medication.name : `ID: ${schedule.medication}`;
                     
                     return (
-                      <View key={schedule._id || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
+    <View key={schedule._id || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
                         <View style={styles.scheduleHeader}>
                           <Text style={[styles.scheduleTitle, { color: theme.primary }]}>
                             Container {schedule.container}

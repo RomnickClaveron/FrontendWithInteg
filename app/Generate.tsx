@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import * as Print from 'expo-print';
