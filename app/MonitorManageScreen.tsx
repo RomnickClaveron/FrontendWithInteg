@@ -6,15 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from './context/ThemeContext';
 import { lightTheme, darkTheme } from './styles/theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { jwtDecode } from 'jwt-decode';
-
-// Interface for decoded JWT token
-interface DecodedToken {
-  id: string;
-  userId: string;
-  role?: string;
-}
+import monitorService from './services/monitorService';
 
 const MonitorManageScreen = () => {
   const navigation = useNavigation();
@@ -24,8 +16,12 @@ const MonitorManageScreen = () => {
   // State for schedule data
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [medications, setMedications] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [containerSchedules, setContainerSchedules] = useState<Record<number, { pill: string | null, alarms: Date[] }>>({
+    1: { pill: null, alarms: [] },
+    2: { pill: null, alarms: [] },
+    3: { pill: null, alarms: [] }
+  });
 
   // Load schedule data on component mount and when screen comes into focus
   useEffect(() => {
@@ -41,145 +37,23 @@ const MonitorManageScreen = () => {
     return unsubscribe;
   }, [navigation]);
 
-  // Get current user ID and role from JWT token
-  const getCurrentUserId = async (): Promise<number> => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      
-      if (!token) {
-        console.warn('No token found, using default user ID 1');
-        return 1;
-      }
-
-      const decodedToken = jwtDecode<DecodedToken>(token.trim());
-      const rawId = decodedToken.userId ?? decodedToken.id;
-      const userId = parseInt(rawId);
-      
-      if (isNaN(userId)) {
-        console.warn('Invalid user ID in token, using default user ID 1');
-        return 1;
-      }
-
-      // Get user role from AsyncStorage (stored during login)
-      const storedUserRole = await AsyncStorage.getItem('userRole');
-      
-      // Check if user role allows Elder access (role 2 for Elder based on login screen)
-      const userRole = decodedToken.role?.toString() || storedUserRole;
-      
-      // Allow access if role is 2 (Elder) or if no role restriction is set
-      if (userRole && userRole !== "2") {
-        console.warn('User role is not Elder (role != 2):', userRole);
-        Alert.alert('Access Denied', 'Only Elders can set up medication schedules.');
-        throw new Error('Only Elders can set up medication schedules');
-      }
-
-      return userId;
-    } catch (error) {
-      console.error('Error getting user ID from token:', error);
-      if (error instanceof Error && error.message.includes('Only Elders')) {
-        throw error; // Re-throw role-based errors
-      }
-      return 1; // Default fallback for other errors
-    }
-  };
-
-  // Get selected elder ID for caregivers
-  const getSelectedElderId = async (): Promise<string | null> => {
-    try {
-      const selectedElderId = await AsyncStorage.getItem('selectedElderId');
-      return selectedElderId;
-    } catch (error) {
-      console.error('Error getting selected elder ID:', error);
-      return null;
-    }
-  };
-
-  // Get latest schedule ID
-  const getLatestScheduleId = async (): Promise<number> => {
-    try {
-      const response = await fetch('https://pillnow-database.onrender.com/api/medication_schedules');
-      const data = await response.json();
-      const allSchedules = data.data || [];
-      
-      if (allSchedules.length === 0) {
-        return 0; // No schedules exist
-      }
-      
-      // Find the highest schedule ID
-      const highestScheduleId = Math.max(...allSchedules.map((schedule: any) => schedule.scheduleId));
-      return highestScheduleId;
-    } catch (error) {
-      console.error('Error getting latest schedule ID:', error);
-      return 0;
-    }
-  };
-
-  // Load schedule data
+  // Load schedule data using API service
   const loadScheduleData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Get current user ID
-      const currentUserId = await getCurrentUserId();
+      // Get current user ID and validate role
+      const currentUserId = await monitorService.getCurrentUserId();
       
-      // Fetch medications and schedules with cache-busting to ensure fresh data
-      const medicationsResponse = await fetch('https://pillnow-database.onrender.com/api/medications', {
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'If-Modified-Since': '0'
-        }
-      });
-      const medicationsData = await medicationsResponse.json();
+      // Get selected elder ID for caregivers (if any)
+      const selectedElderId = await monitorService.getSelectedElderId(currentUserId.toString());
       
-      // Normalize medications to an array regardless of API wrapper shape
-      const medsArray = Array.isArray(medicationsData) ? medicationsData : (medicationsData?.data || []);
+      // Load schedule data from API
+      const data = await monitorService.loadScheduleData(currentUserId, selectedElderId || undefined);
       
-      const schedulesResponse = await fetch('https://pillnow-database.onrender.com/api/medication_schedules', {
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'If-Modified-Since': '0'
-        }
-      });
-      const schedulesData = await schedulesResponse.json();
-      
-      // Get all schedules and filter by current user ID or selected elder ID
-      const allSchedules = schedulesData.data || [];
-      
-      // Check if there's a selected elder (for caregivers)
-      const selectedElderId = await getSelectedElderId();
-      
-      // Filter schedules based on user role and selected elder
-      let userSchedules;
-      if (selectedElderId) {
-        // If caregiver has selected an elder, show that elder's schedules
-        userSchedules = allSchedules.filter((schedule: any) => {
-          const scheduleUserId = parseInt(schedule.user);
-          return scheduleUserId === parseInt(selectedElderId);
-        });
-      } else {
-        // Otherwise, show current user's schedules
-        userSchedules = allSchedules.filter((schedule: any) => {
-          const scheduleUserId = parseInt(schedule.user);
-          return scheduleUserId === currentUserId;
-        });
-      }
-      
-      // Sort by schedule ID (highest first) and take top 3, then arrange by container number
-      const sortedSchedules = userSchedules
-        .sort((a: any, b: any) => b.scheduleId - a.scheduleId) // Sort by highest schedule ID first
-        .slice(0, 3) // Take top 3 highest schedule IDs
-        .sort((a: any, b: any) => {
-          // Then arrange by container number (1, 2, 3)
-          const containerA = parseInt(a.container);
-          const containerB = parseInt(b.container);
-          return containerA - containerB;
-        });
-      
-      setMedications(medsArray);
-      setSchedules(sortedSchedules);
+      setSchedules(data.schedules);
+      setContainerSchedules(data.containerSchedules);
       
     } catch (err) {
       console.error('Error loading schedule data:', err);
@@ -193,55 +67,6 @@ const MonitorManageScreen = () => {
   // Manual refresh function
   const handleRefresh = async () => {
     await loadScheduleData();
-  };
-
-  // Get container schedules
-  const getContainerSchedules = (): Record<number, { pill: string | null, alarms: Date[] }> => {
-    const containerSchedules: Record<number, { pill: string | null, alarms: Date[] }> = {
-      1: { pill: null, alarms: [] },
-      2: { pill: null, alarms: [] },
-      3: { pill: null, alarms: [] }
-    };
-    
-    if (!schedules.length || !medications.length) {
-      return containerSchedules;
-    }
-    
-    // Group schedules by container
-    const schedulesByContainer: Record<number, any[]> = {};
-    schedules.forEach((schedule: any) => {
-      const containerNum = parseInt(schedule.container) || 1;
-      if (!schedulesByContainer[containerNum]) {
-        schedulesByContainer[containerNum] = [];
-      }
-      schedulesByContainer[containerNum].push(schedule);
-    });
-    
-    // Process each container
-    for (let containerNum = 1; containerNum <= 3; containerNum++) {
-      const containerSchedulesList = schedulesByContainer[containerNum] || [];
-      
-      if (containerSchedulesList.length > 0) {
-        const firstSchedule = containerSchedulesList[0];
-        const medicationId = firstSchedule.medication;
-        
-        // Find medication name from ID
-        const medication = medications.find(med => med.medId === medicationId);
-        const medicationName = medication ? medication.name : `ID: ${medicationId}`;
-        
-        containerSchedules[containerNum] = {
-          pill: medicationName,
-          alarms: containerSchedulesList.map((schedule: any) => {
-            const dateStr = schedule.date;
-            const timeStr = schedule.time;
-            const combinedDateTime = `${dateStr}T${timeStr}`;
-            return new Date(combinedDateTime);
-          })
-        };
-      }
-    }
-    
-    return containerSchedules;
   };
 
   if (loading) {
@@ -270,8 +95,6 @@ const MonitorManageScreen = () => {
       </View>
     );
   }
-
-  const containerSchedules = getContainerSchedules();
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -309,35 +132,33 @@ const MonitorManageScreen = () => {
         ) : (
           <View style={styles.schedulesList}>
             {schedules.map((schedule: any, index: number) => {
-              // Find medication name from ID
-              const medication = medications.find(med => med.medId === schedule.medication);
-              const medicationName = medication ? medication.name : `ID: ${schedule.medication}`;
+              const medicationName = schedule.medicationName || 'Unknown Medication';
               
               return (
                 <View key={schedule._id || index} style={[styles.scheduleItem, { borderColor: theme.border }]}>
                   <View style={styles.scheduleHeader}>
                     <Text style={[styles.scheduleTitle, { color: theme.primary }]}>
-                      Container {schedule.container}
+                      Container {schedule.container || 'N/A'}
                     </Text>
                     <View style={[
                       styles.statusBadge, 
                       { backgroundColor: schedule.status === 'Pending' ? theme.warning : theme.success }
                     ]}>
                       <Text style={[styles.statusText, { color: theme.card }]}>
-                        {schedule.status}
+                        {schedule.status || 'Active'}
                       </Text>
                     </View>
                   </View>
                   
                   <View style={styles.scheduleDetails}>
                     <Text style={[styles.detailText, { color: theme.text }]}>
-                      <Text style={styles.label}>Medication:</Text> {medicationName || 'Unknown Medication'}
+                      <Text style={styles.label}>Medication:</Text> {medicationName}
                     </Text>
                     <Text style={[styles.detailText, { color: theme.text }]}>
-                      <Text style={styles.label}>Date:</Text> {schedule.date}
+                      <Text style={styles.label}>Date:</Text> {schedule.date || 'N/A'}
                     </Text>
                     <Text style={[styles.detailText, { color: theme.text }]}>
-                      <Text style={styles.label}>Time:</Text> {schedule.time}
+                      <Text style={styles.label}>Time:</Text> {schedule.time || 'N/A'}
                     </Text>
                   </View>
                 </View>

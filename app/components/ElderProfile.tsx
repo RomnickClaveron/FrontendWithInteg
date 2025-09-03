@@ -38,10 +38,14 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
   const theme = isDarkMode ? darkTheme : lightTheme;
 
   // State for elder connection
+  const [elderName, setElderName] = useState('');
   const [elderPhone, setElderPhone] = useState('');
+  const [otp, setOtp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [connectedElders, setConnectedElders] = useState<ElderUser[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showOtpField, setShowOtpField] = useState(false);
 
   // Get current caregiver ID from JWT token
   const getCurrentCaregiverId = async (): Promise<string> => {
@@ -103,201 +107,96 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
     }
   };
 
-  // Connect to elder by phone number
-  const connectToElder = async () => {
-    console.log('Connect button pressed with phone:', elderPhone);
-    
+    // Add elder profile (simplified - creates local profile)
+  const addElderProfile = async () => {
     if (!elderPhone.trim()) {
       Alert.alert('Error', 'Please enter the elder\'s phone number');
       return;
     }
 
+    if (!elderName.trim()) {
+      Alert.alert('Error', 'Please enter the elder\'s name');
+      return;
+    }
+
     try {
-      setIsConnecting(true);
+      setIsVerifying(true);
       
-      // Get token for authentication
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        Alert.alert('Error', 'Authentication required. Please log in again.');
-        return;
-      }
-
-      console.log('Token found, attempting to connect to elder...');
-
-      // Try to find elder by phone number using elder-specific endpoints
-      let elder: ElderUser | null = null;
-      
-      try {
-        // Try different endpoints that should only return elders
-        const endpoints = [
-          `https://pillnow-database.onrender.com/api/elders/phone/${elderPhone.trim()}`,
-          `https://pillnow-database.onrender.com/api/users/elder/${elderPhone.trim()}`,
-          `https://pillnow-database.onrender.com/api/users/phone/${elderPhone.trim()}?role=2`,
-          `https://pillnow-database.onrender.com/api/users?phone=${elderPhone.trim()}&role=2`
-        ];
-
-        for (const endpoint of endpoints) {
-          try {
-            console.log('Trying endpoint:', endpoint);
-            
-            const elderResponse = await fetch(endpoint, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              }
-            });
-            
-            console.log('Response status:', elderResponse.status);
-            
-            if (elderResponse.ok) {
-              const elderData = await elderResponse.json();
-              console.log('Response data:', elderData);
-              
-              // Handle different response structures
-              let userData = null;
-              
-              if (Array.isArray(elderData)) {
-                // Response is an array of users
-                userData = elderData[0]; // Take first user from array
-              } else if (elderData.user) {
-                userData = elderData.user;
-              } else if (elderData.elders && Array.isArray(elderData.elders)) {
-                userData = elderData.elders[0]; // Take first elder if array
-              } else if (elderData.users && Array.isArray(elderData.users)) {
-                userData = elderData.users[0]; // Take first user if array
-              } else if (elderData.name || elderData.email) {
-                userData = elderData; // Direct user object
-              }
-              
-              if (userData && userData.role === 2) {
-                elder = userData;
-                console.log('Elder found:', elder!.name);
-                console.log('Elder object:', elder);
-                console.log('Elder object keys:', Object.keys(elder!));
-                console.log('Elder userId:', elder!.userId);
-                console.log('Elder _id:', elder!._id);
-                console.log('Elder id:', elder!.id);
-                console.log('Elder ID field:', elder!.userId);
-                console.log('Elder User ID:', elder!.userId);
-                console.log('Elder details - Name:', elder!.name, 'Email:', elder!.email, 'Phone:', elder!.contactNumber);
-                break; // Found elder, stop trying other endpoints
-              } else if (userData) {
-                // User found but not an elder
-                const userRole = userData.role;
-                console.log('User found but not an elder, role:', userRole);
-                
-                let roleMessage = '';
-                if (userRole === 1) {
-                  roleMessage = 'This phone number belongs to an admin account. Only elder accounts can be connected.';
-                } else if (userRole === 3) {
-                  roleMessage = 'This phone number belongs to a caregiver account. Only elder accounts can be connected.';
-                } else {
-                  roleMessage = 'This phone number belongs to a user who is not registered as an elder. Only elder accounts (role 2) can be connected.';
-                }
-                
-                Alert.alert('Invalid User Type', roleMessage);
-                return;
-              }
-            } else if (elderResponse.status === 403) {
-              console.log('403 Forbidden - Access denied for endpoint:', endpoint);
-              continue; // Try next endpoint
-            } else if (elderResponse.status === 404) {
-              console.log('404 Not Found for endpoint:', endpoint);
-              continue; // Try next endpoint
-            }
-          } catch (endpointError) {
-            console.log('Endpoint failed:', endpoint, endpointError);
-            continue; // Try next endpoint
-          }
-        }
-      } catch (error) {
-        console.error('Error accessing user by phone:', error);
-        Alert.alert('Error', 'Failed to verify user account. Please try again.');
-        return;
-      }
-      
-      if (!elder) {
-        console.log('No elder found after trying all endpoints');
-        Alert.alert(
-          'Elder Not Found', 
-          'No elder account found with this phone number. Please check the number and try again.\n\nNote: Only registered elders (role 2) can be connected.'
-        );
-        return;
-      }
-
-      // Check if already in the list
+      // Check if elder with this phone number already exists in connected list
       const existingElder = connectedElders.find(conn => 
-        (conn.userId === elder!.userId)
+        conn.contactNumber === elderPhone.trim()
       );
       
       if (existingElder) {
-        console.log('Elder already connected:', elder!.name);
-        Alert.alert('Already Connected', `${elder!.name} is already in your list.`);
+        Alert.alert('Already Connected', `${existingElder.name} with phone ${elderPhone.trim()} is already in your list.`);
         return;
       }
 
-      // Validate that we have the elder's ID
-      const elderId = elder!.userId;
-      if (!elderId) {
-        console.error('Elder found but missing ID:', elder);
-        Alert.alert('Error', 'Elder found but missing user ID. Please try again.');
-        return;
-      }
+      // Create a new elder profile locally
+      const newElder: ElderUser = {
+        userId: `local_${Date.now()}`, // Generate local ID
+        name: elderName.trim(),
+        email: '', // Can be empty for local profiles
+        contactNumber: elderPhone.trim(),
+        role: 2, // Elder role
+        profileImage: undefined
+      };
 
       // Add to connected elders list
-      const updatedElders = [...connectedElders, elder!];
-      console.log('Adding elder to list:', elder!);
-      console.log('Elder object structure:', JSON.stringify(elder!, null, 2));
-      console.log('Updated elders list:', updatedElders);
+      const updatedElders = [...connectedElders, newElder];
       await saveConnectedElders(updatedElders);
       setConnectedElders(updatedElders);
 
-      console.log('Successfully connected to elder:', elder!.name);
-      console.log('Elder User ID stored:', elderId);
       Alert.alert(
         'Success', 
-        `Successfully connected to ${elder!.name}\n\nElder ID: ${elderId}\nPhone: ${elder!.contactNumber}`
+        `Successfully added ${newElder.name} to your elder list.\n\nPhone: ${newElder.contactNumber}`
       );
       
       // Reset form
+      setElderName('');
       setElderPhone('');
+      setOtp('');
+      setShowOtpField(false);
       
     } catch (error) {
-      console.error('Error connecting to elder:', error);
-      Alert.alert('Error', 'Failed to connect to elder. Please try again.');
+      console.error('Error adding elder:', error);
+      Alert.alert('Error', 'Failed to add elder. Please try again.');
     } finally {
-      setIsConnecting(false);
+      setIsVerifying(false);
     }
+  };
+
+    // Connect to elder (simplified for testing - no OTP required)
+  const connectToElder = async () => {
+    // This function is now simplified since connection happens in verifyElderPhone
+    // You can use this for manual connection if needed
+    Alert.alert('Info', 'Connection is now automatic after verification. Use the VERIFY button to connect to an elder.');
+  };
+
+  // Cancel connection process
+  const cancelConnection = () => {
+    setElderName('');
+    setElderPhone('');
+    setOtp('');
+    setShowOtpField(false);
   };
 
   // Remove elder from list
   const removeElder = async (elderId: string | undefined) => {
-    console.log('Remove elder called with ID:', elderId);
-    
     if (!elderId) {
       Alert.alert('Error', 'Cannot remove elder: Invalid elder ID');
       return;
     }
     
-    // Check if elder is actually in the list
-    console.log('Current connected elders for removal check:', connectedElders);
-    console.log('Looking for elder with ID:', elderId);
-    
     const elderInList = connectedElders.find(elder => {
       const elderUserId = elder.userId || elder._id || elder.id;
-      console.log('Checking elder:', elder.name, 'with ID fields:', { userId: elder.userId, _id: elder._id, id: elder.id });
       return elderUserId === elderId;
     });
     
     if (!elderInList) {
-      console.log('Elder not found in connected list with ID:', elderId);
-      console.log('Available elders:', connectedElders.map(e => ({ name: e.name, id: e.userId || e._id || e.id })));
       Alert.alert('Error', 'Elder not found in connected list');
       return;
     }
-    
-    console.log('Found elder in list:', elderInList.name);
-    console.log('Elder object structure for removal:', JSON.stringify(elderInList, null, 2));
     
     Alert.alert(
       'Disconnect Elder',
@@ -309,31 +208,13 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('Removing elder from list...');
-              console.log('Current connected elders:', connectedElders);
-              console.log('Looking for elder with ID:', elderId);
-              
-              // Remove from list using any available ID field
-              console.log('Before removal - connected elders count:', connectedElders.length);
               const updatedElders = connectedElders.filter(elder => {
                 const elderUserId = elder.userId || elder._id || elder.id;
-                console.log('Comparing elder ID:', elderUserId, 'with:', elderId, 'Result:', elderUserId !== elderId);
                 return elderUserId !== elderId;
               });
               
-              console.log('After removal - updated elders count:', updatedElders.length);
-              console.log('Updated elders list:', updatedElders);
-              
               await saveConnectedElders(updatedElders);
               setConnectedElders(updatedElders);
-
-              console.log('Elder disconnected successfully');
-              console.log('State updated, connected elders count:', updatedElders.length);
-              
-              // Force a re-render by updating state again
-              setTimeout(() => {
-                setConnectedElders([...updatedElders]);
-              }, 100);
               
               Alert.alert('Success', 'Elder disconnected successfully');
             } catch (error) {
@@ -359,8 +240,6 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
   // Select elder to monitor
   const selectElder = async (elderId: string | undefined, elderName: string) => {
     try {
-      console.log('Select elder called with ID:', elderId, 'Name:', elderName);
-      
       if (!elderId) {
         Alert.alert('Error', 'Cannot select elder: Invalid elder ID');
         return;
@@ -369,12 +248,9 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
       await AsyncStorage.setItem('selectedElderId', elderId);
       await AsyncStorage.setItem('selectedElderName', elderName);
       
-      console.log('Elder selected for monitoring:', elderName);
       Alert.alert('Success', `Now monitoring ${elderName}`);
       
-      // Call the callback if provided
       if (onElderSelected) {
-        console.log('Calling onElderSelected callback');
         onElderSelected(elderId, elderName);
       }
     } catch (error) {
@@ -384,72 +260,118 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Header Section */}
-      <View style={[styles.header, { backgroundColor: theme.card }]}>
+    <View style={[styles.container, { backgroundColor: '#F5F7FA' }]}>
+      {/* Header */}
+      <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton} 
           onPress={onBack}
         >
-          <Ionicons name="arrow-back" size={30} color={theme.text} />
+          <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: theme.secondary }]}>
-          ELDER <Text style={[styles.highlight, { color: theme.primary }]}>CONNECTIONS</Text>
-        </Text>
+        <Text style={styles.title}>ELDER'S PROFILE</Text>
       </View>
 
-      {/* Connect Elder Section */}
-      <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.sectionTitle, { color: theme.secondary }]}>Connect to Elder</Text>
-        <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-          Enter the elder's registered phone number to connect
-        </Text>
-        
-        <TextInput 
-          style={[styles.input, { 
-            backgroundColor: theme.background,
-            borderColor: theme.border,
-            color: theme.text,
-          }]} 
-          placeholder="Elder's Phone Number" 
-          placeholderTextColor={theme.textSecondary}
-          value={elderPhone}
-          onChangeText={setElderPhone}
-          keyboardType="phone-pad"
-        />
+      {/* Main Content Card */}
+      <View style={styles.mainCard}>
+        {/* Profile Picture Section */}
+        <View style={styles.profileSection}>
+          <View style={styles.profileImageContainer}>
+            <Image 
+              source={require('@/assets/images/profile.png')} 
+              style={styles.profileImage} 
+            />
+            <TouchableOpacity style={styles.editButton}>
+              <Ionicons name="pencil" size={16} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
 
-        <TouchableOpacity 
-          style={[styles.connectButton, { backgroundColor: theme.primary }]}
-          onPress={connectToElder}
-          disabled={isConnecting}
-        >
-          {isConnecting ? (
-            <ActivityIndicator color={theme.card} />
-          ) : (
-            <Text style={[styles.buttonText, { color: theme.card }]}>CONNECT</Text>
+        {/* Input Fields */}
+        <View style={styles.inputSection}>
+          <TextInput 
+            style={styles.input} 
+            placeholder="Name" 
+            placeholderTextColor="#999"
+            value={elderName}
+            onChangeText={setElderName}
+          />
+          
+          <View style={styles.phoneRow}>
+            <TextInput 
+              style={[styles.input, styles.phoneInput]} 
+              placeholder="Contact No." 
+              placeholderTextColor="#999"
+              value={elderPhone}
+              onChangeText={setElderPhone}
+              keyboardType="phone-pad"
+            />
+            <TouchableOpacity 
+              style={[styles.verifyButton, { backgroundColor: isVerifying ? '#CCC' : '#4A90E2' }]}
+              onPress={addElderProfile}
+              disabled={isVerifying}
+            >
+              {isVerifying ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <Text style={styles.verifyButtonText}>ADD</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {showOtpField && (
+            <TextInput 
+              style={styles.input} 
+              placeholder="OTP" 
+              placeholderTextColor="#999"
+              value={otp}
+              onChangeText={setOtp}
+              keyboardType="numeric"
+              maxLength={4}
+            />
           )}
-        </TouchableOpacity>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={styles.cancelButton}
+            onPress={cancelConnection}
+          >
+            <Text style={styles.cancelButtonText}>CANCEL</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.saveButton, { backgroundColor: isConnecting ? '#CCC' : '#4A90E2' }]}
+            onPress={connectToElder}
+            disabled={isConnecting}
+          >
+            {isConnecting ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <Text style={styles.saveButtonText}>SAVE</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Connected Elders Section */}
-      <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.sectionTitle, { color: theme.secondary }]}>
+      <View style={styles.connectedSection}>
+        <Text style={styles.connectedTitle}>
           Connected Elders ({connectedElders.length})
         </Text>
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={theme.primary} />
-            <Text style={[styles.loadingText, { color: theme.text }]}>Loading connections...</Text>
+            <ActivityIndicator size="large" color="#4A90E2" />
+            <Text style={styles.loadingText}>Loading connections...</Text>
           </View>
         ) : connectedElders.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={50} color={theme.textSecondary} />
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-              No connected elders yet
-            </Text>
-            <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
-              Connect to an elder using their phone number above
+            <Ionicons name="people-outline" size={50} color="#999" />
+            <Text style={styles.emptyText}>No connected elders yet</Text>
+            <Text style={styles.emptySubtext}>
+              Add an elder to your monitoring list using the form above
             </Text>
           </View>
         ) : (
@@ -457,63 +379,50 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
             data={connectedElders}
             keyExtractor={(item, index) => item.userId || `elder-${index}`}
             renderItem={({ item }) => (
-              <View style={[styles.elderCard, { borderColor: theme.border }]}>
+              <View style={styles.elderCard}>
                 <View style={styles.elderInfo}>
                   <Image 
                     source={item.profileImage ? { uri: item.profileImage } : require('@/assets/images/profile.png')} 
                     style={styles.elderImage} 
                   />
                   <View style={styles.elderDetails}>
-                    <Text style={[styles.elderName, { color: theme.text }]}>{item.name}</Text>
-                    <Text style={[styles.elderPhone, { color: theme.textSecondary }]}>{item.contactNumber}</Text>
-                    <Text style={[styles.elderEmail, { color: theme.textSecondary }]}>{item.email}</Text>
-                    <Text style={[styles.elderId, { color: theme.primary, fontSize: 12 }]}>
-                      ID: {item.userId || 'N/A'}
-                    </Text>
+                    <Text style={styles.elderName}>{item.name}</Text>
+                    <Text style={styles.elderPhone}>{item.contactNumber}</Text>
+                    <Text style={styles.elderEmail}>{item.email}</Text>
                   </View>
                 </View>
                 
                 <View style={styles.elderActions}>
                   <View style={styles.actionRow}>
                     <TouchableOpacity 
-                      style={[styles.actionButton, { backgroundColor: theme.secondary }]}
-                      onPress={() => {
-                        console.log('Details button pressed for elder:', item.name);
-                        showElderDetails(item);
-                      }}
-                      activeOpacity={0.7}
+                      style={styles.actionButton}
+                      onPress={() => showElderDetails(item)}
                     >
-                      <Ionicons name="information-circle" size={16} color={theme.card} />
-                      <Text style={[styles.actionText, { color: theme.card }]}>Details</Text>
+                      <Ionicons name="information-circle" size={16} color="#FFF" />
+                      <Text style={styles.actionText}>Details</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity 
-                      style={[styles.actionButton, { backgroundColor: theme.primary }]}
+                      style={[styles.actionButton, { backgroundColor: '#4A90E2' }]}
                       onPress={() => {
-                        console.log('Monitor button pressed for elder:', item.name);
                         const elderId = item.userId || item._id || item.id;
-                        console.log('Elder ID for monitor:', elderId);
                         selectElder(elderId, item.name);
                       }}
-                      activeOpacity={0.7}
                     >
-                      <Ionicons name="eye" size={16} color={theme.card} />
-                      <Text style={[styles.actionText, { color: theme.card }]}>Monitor</Text>
+                      <Ionicons name="eye" size={16} color="#FFF" />
+                      <Text style={styles.actionText}>Monitor</Text>
                     </TouchableOpacity>
                   </View>
                   
                   <TouchableOpacity 
-                    style={[styles.removeButton, { backgroundColor: theme.error }]}
-                                          onPress={() => {
-                        console.log('Remove button pressed for elder:', item.name);
-                        const elderId = item.userId || item._id || item.id;
-                        console.log('Elder ID for remove:', elderId);
-                        removeElder(elderId);
-                      }}
-                    activeOpacity={0.7}
+                    style={[styles.actionButton, { backgroundColor: '#FF6B6B' }]}
+                    onPress={() => {
+                      const elderId = item.userId || item._id || item.id;
+                      removeElder(elderId);
+                    }}
                   >
-                    <Ionicons name="close" size={16} color={theme.card} />
-                    <Text style={[styles.actionText, { color: theme.card }]}>Disconnect</Text>
+                    <Ionicons name="close" size={16} color="#FFF" />
+                    <Text style={styles.actionText}>Disconnect</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -529,62 +438,130 @@ export default function ElderProfile({ onElderSelected, onBack }: ElderProfilePr
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    backgroundColor: '#F5F7FA',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    width: '100%',
-    marginTop: 40,
-    padding: 15,
-    borderRadius: 15,
-    elevation: 8,
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 20,
   },
   backButton: {
     padding: 10,
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
     marginLeft: 10,
-  },
-  highlight: {
     color: '#4A90E2',
   },
-  section: {
-    marginTop: 20,
-    padding: 20,
+  mainCard: {
+    backgroundColor: '#FFF',
+    margin: 20,
     borderRadius: 15,
-    elevation: 5,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  sectionTitle: {
+  profileSection: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  profileImageContainer: {
+    position: 'relative',
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 15,
+  },
+  editButton: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    backgroundColor: '#4A90E2',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inputSection: {
+    marginBottom: 30,
+  },
+  input: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+    marginBottom: 15,
+    fontSize: 16,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  phoneInput: {
+    flex: 1,
+  },
+  verifyButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifyButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 15,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#FF6B9D',
+    paddingVertical: 15,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  saveButton: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  connectedSection: {
+    flex: 1,
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  connectedTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 15,
-  },
-  helperText: {
-    fontSize: 14,
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  input: {
-    width: '100%',
-    height: 55,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    marginBottom: 15,
-    fontSize: 16,
-  },
-  connectButton: {
-    padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  buttonText: {
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: '#333',
   },
   loadingContainer: {
     alignItems: 'center',
@@ -593,6 +570,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
+    color: '#666',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -602,17 +580,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginTop: 10,
+    color: '#666',
   },
   emptySubtext: {
     fontSize: 14,
     textAlign: 'center',
     marginTop: 5,
+    color: '#999',
   },
   elderCard: {
+    backgroundColor: '#FFF',
     padding: 15,
     borderRadius: 12,
-    borderWidth: 1,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
   elderInfo: {
     flexDirection: 'row',
@@ -632,17 +614,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 2,
+    color: '#333',
   },
   elderPhone: {
     fontSize: 14,
     marginBottom: 2,
+    color: '#666',
   },
   elderEmail: {
     fontSize: 12,
-  },
-  elderId: {
-    fontSize: 12,
-    fontWeight: 'bold',
+    color: '#999',
   },
   elderActions: {
     flexDirection: 'column',
@@ -660,17 +641,11 @@ const styles = StyleSheet.create({
     gap: 4,
     flex: 1,
     justifyContent: 'center',
+    backgroundColor: '#6C757D',
   },
   actionText: {
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  removeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 8,
-    gap: 4,
-    justifyContent: 'center',
+    color: '#FFF',
   },
 });

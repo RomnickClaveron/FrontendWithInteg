@@ -254,14 +254,14 @@ export default function UserListScreen() {
           style={styles.profileButton} 
           onPress={() => setProfileModalVisible(true)}
         >
-          <User size={24} color="#D14A99" />
+          <User size={24} stroke="#D14A99" />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <Search size={20} color="#666" style={styles.searchIcon} />
+          <Search size={20} stroke="#666" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search users..."
@@ -280,7 +280,7 @@ export default function UserListScreen() {
           <View style={styles.retryContainer}>
             <Text style={styles.errorText}>Failed to load users.</Text>
             <TouchableOpacity onPress={fetchUsers} style={styles.retryButton}>
-              <RefreshCcw size={18} color="#fff" />
+              <RefreshCcw size={18} stroke="#fff" />
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
           </View>

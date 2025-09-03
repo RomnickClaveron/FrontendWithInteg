@@ -13,6 +13,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const medicationRoutes = require('./routes/medications');
 const caregiverRoutes = require('./routes/caregivers');
+const monitorRoutes = require('./routes/monitor');
 
 // Security middleware
 app.use(helmet());
@@ -47,6 +48,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/medications', medicationRoutes);
 app.use('/api/caregivers', caregiverRoutes);
+app.use('/api/monitor', monitorRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
