@@ -1,24 +1,35 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MedicationNotification from './components/MedicationNotification';
+import NotificationManager from './components/NotificationManager';
+import { useNotifications } from './hooks/useNotifications';
 import { useTheme } from './context/ThemeContext';
 import { lightTheme, darkTheme } from './styles/theme';
 
 const CaregiverDashboard: React.FC = () => {
   const router = useRouter();
-  const [showNotification, setShowNotification] = useState(false);
   const { isDarkMode } = useTheme();
   const theme = isDarkMode ? darkTheme : lightTheme;
+  const { 
+    showTestAlarm, 
+    closeNotification, 
+    isModalVisible, 
+    currentNotification,
+    isLoading 
+  } = useNotifications();
 
   const handleShowNotification = () => {
-    setShowNotification(true);
+    showTestAlarm({
+      medicationName: 'Losartan',
+      containerId: 1,
+      scheduledTime: '08:00 AM'
+    });
   };
 
   const handleDismissNotification = () => {
-    setShowNotification(false);
+    closeNotification();
   };
 
   const handleLogout = async () => {
@@ -32,23 +43,12 @@ const CaregiverDashboard: React.FC = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <Modal
-        visible={showNotification}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={handleDismissNotification}
-      >
-        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
-          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
-            <MedicationNotification
-              medicineName="Losartan"
-              containerId={1}
-              scheduledTime="08:00 AM"
-              onDismiss={handleDismissNotification}
-            />
-          </View>
-        </View>
-      </Modal>
+      <NotificationManager
+        visible={isModalVisible}
+        onClose={handleDismissNotification}
+        notificationData={currentNotification}
+        onNotificationDismissed={handleDismissNotification}
+      />
 
       {/* Header Section */}
       <View style={[styles.header, { backgroundColor: theme.card }]}>
@@ -213,19 +213,6 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontWeight: 'bold',
     fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    width: '85%',
-    aspectRatio: 1,
-    borderRadius: 25,
-    padding: 30,
-    elevation: 5,
   },
   logoutButton: {
     padding: 10,
